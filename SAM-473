@@ -1,0 +1,279 @@
+ConcurrenceApplicationDTO :-*********************************************************************************************************************************
+package in.hertz.samast.domain;
+
+import java.util.Date;
+import java.util.List;
+
+import com.fasterxml.jackson.annotation.JsonFormat;
+import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.annotation.JsonInclude.Include;
+
+import lombok.Getter;
+import lombok.Setter;
+
+@Setter
+@Getter
+@JsonInclude(Include.NON_NULL)
+public class ConcurrenceApplicationDTO {
+	
+	private String applicantType;
+	private String transactionType;
+	private String stoaType;
+	private String applicantName;
+	private String pspclConsumerAccountNumber;
+	private String openAccessIdNo;
+	
+	private AddressDetailsDTO addressDetails;
+	
+	@JsonFormat(pattern = "yyyy-MM-dd")
+	private Date dateOfApplication;
+	
+	private List<RequestedPowerTransactionDTO> requestedPowerTransactionDTOs;
+	
+	private EntityTransactionDetailsDTO transactionDetailsDTOForInjectingEntity;
+	private EntityTransactionDetailsDTO transactionDetailsDTOForDraweeEntity;
+	
+	private ApplicationFeeDeatailsDTO applicationFeeDeatailsDTO;
+	
+	private Double transmissionCharges;
+	private Double wheelingCharges;
+	private Double sldcOperatingCharges;
+	private Double totalCharges;
+	
+
+}
+************************************************************************************************************************************************************
+package in.hertz.samast.domain;
+
+import java.sql.Time;
+import java.util.Date;
+
+import com.fasterxml.jackson.annotation.JsonFormat;
+import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.annotation.JsonInclude.Include;
+
+import lombok.Getter;
+import lombok.Setter;
+
+@Setter
+@Getter
+@JsonInclude(Include.NON_NULL)
+public class RequestedPowerTransactionDTO {
+	@JsonFormat(pattern = "yyyy-MM-dd")
+	private Date fromDate;
+	@JsonFormat(pattern = "yyyy-MM-dd")
+	private Date toDate;
+	private Time fromPeriod;
+	private Time toPeriod;
+	private Double consumerBusDrawlPoint;
+	private Double generatorBusDeliveryPoint;
+
+}
+
+
+
+
+
+Controller :-**********************************************************************************************************************************************
+package in.hertz.ctrl;
+
+import java.util.Objects;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+
+import in.hertz.samast.domain.ConcurrenceApplicationDTO;
+import in.hertz.samast.domain.NocApplicationDTO;
+import in.hertz.samast.domain.WSResp;
+import in.hertz.samast.domain.exception.BusinessException;
+import in.hertz.samast.entity.Draft;
+import in.hertz.service.OANocService;
+
+@RestController
+@RequestMapping("/oa-noc-application")
+public class OANocCtrl {
+	
+	@Autowired
+	private OANocService oaNocService;
+	
+	@PostMapping("/submit-noc-form")
+	public WSResp<Draft<NocApplicationDTO>> saveNocFormData(@RequestBody NocApplicationDTO nocApplicationDTO) throws Exception, BusinessException{
+		Draft<NocApplicationDTO> savedDraft = oaNocService.saveNocFormData(nocApplicationDTO);
+		if(Objects.nonNull(savedDraft)) 
+			return new WSResp<>(savedDraft, true, "Application Form Data Saved Successfully");
+		return new WSResp<>(savedDraft, false, "Could not Saved Application Form Data");
+	}
+	
+	@PostMapping("/submit-concurrence-noc-form")
+	public WSResp<Draft<ConcurrenceApplicationDTO>> saveConcurrenceFormData(@RequestBody ConcurrenceApplicationDTO concurrenceApplicationDTO) throws Exception, BusinessException{
+		Draft<ConcurrenceApplicationDTO> savedConcurDraft = oaNocService.saveConcurrenceFormData(concurrenceApplicationDTO);
+		if(Objects.nonNull(savedConcurDraft))
+			return new WSResp<>(savedConcurDraft, true, "Concurrence Application Form Data Saved Successfully");
+		return new WSResp<>(savedConcurDraft, false, "Could not Saved Concurrence Application Form Data");
+	}
+
+}
+
+Service :-************************************************************************************************************************************************
+package in.hertz.service;
+
+import java.sql.Time;
+import java.util.Calendar;
+import java.util.Date;
+import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
+import java.util.concurrent.TimeUnit;
+
+import org.apache.commons.lang3.time.DateUtils;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
+
+import in.hertz.dao.DraftRepository;
+import in.hertz.samast.domain.ConcurrenceApplicationDTO;
+import in.hertz.samast.domain.NocApplicationDTO;
+import in.hertz.samast.domain.RequestedPowerTransactionDTO;
+import in.hertz.samast.domain.exception.BusinessException;
+import in.hertz.samast.entity.Draft;
+import in.hertz.samast.util.FunctionalityArea;
+import in.hertz.samast.util.Status;
+
+@Service
+public class OANocService {
+
+	@Autowired
+	private DraftRepository<NocApplicationDTO> draftRepository;
+	@Autowired
+	private DraftRepository<ConcurrenceApplicationDTO> concurrentDraftRepository;
+	
+// Purchase of Power through Power Exchange
+	public Draft<NocApplicationDTO> saveNocFormData(NocApplicationDTO nocApplicationDTO) throws Exception, BusinessException {
+		nocApplicationDTO.setDateOfApplication(new Date());
+		// Calculate the number of days between dates
+		Date fromDate = nocApplicationDTO.getFromDate();
+		Date toDate = nocApplicationDTO.getToDate();
+		Date dateOfApplication = nocApplicationDTO.getDateOfApplication();
+		
+		long timeDiff = Math.abs(toDate.getTime() - fromDate.getTime());
+		long daysDiff = TimeUnit.DAYS.convert(timeDiff, TimeUnit.MILLISECONDS);
+		if (daysDiff > 31) {
+			throw new BusinessException("The Period of Application should not be greater than 31 days");
+		}
+		long timeDiff1 = Math.abs(fromDate.getTime() - dateOfApplication.getTime());
+		long daysDiff1 = TimeUnit.DAYS.convert(timeDiff1, TimeUnit.MILLISECONDS);
+		if((daysDiff1>15 || daysDiff1<3)) {
+			throw new BusinessException("Minimum 3 and Maximum 15 working days in advance, this form should be submitted ");
+		}
+		System.out.println(nocApplicationDTO.getDateOfApplication().toString());
+		Draft<NocApplicationDTO> draft = new Draft<>();
+		draft.setStatus(Status.PENDING);
+		draft.setFunctionalityArea(FunctionalityArea.OA_NOC_APPLY);
+		draft.setData(nocApplicationDTO);
+		return draftRepository.save(draft);
+	}
+	
+// For Inter-State/Intra-State Bilateral Transaction
+	
+	public void maxThreeMonthValidation(Date fromDate, Date toDate) throws BusinessException {
+		long timeDiff = Math.abs(toDate.getTime() - fromDate.getTime());
+		long daysDiff = TimeUnit.DAYS.convert(timeDiff, TimeUnit.MILLISECONDS);
+		if(daysDiff>90) {
+			throw new BusinessException("Transaction for more than 90 days are not allowed");
+		}
+	}
+	// Individual punch for different month
+	public void punchValidationForDifferentMnth(Date fromDate, Date toDate) throws BusinessException{
+		Calendar cal = Calendar.getInstance();
+		Date date = new Date();
+		cal.setTime(date);
+		
+	}
+	
+	@SuppressWarnings("deprecation")
+	public void requestPowerTransaction(Date fromDate, Date toDate, Time fromPeriod, Time toPeriod, Double qunatum) {
+		Map<Integer, Map<Integer, Map<Integer, Double>>> mnthDayMinuteWiseQtmMap = new TreeMap<>();
+		Map<Integer, Map<Integer, Double>> dayMinuteWiseQtmMap = new TreeMap<>();
+		Map<Integer, Double> minuteWiseQtmMap = new TreeMap<>();
+		int month = fromDate.getMonth();
+		mnthDayMinuteWiseQtmMap.put(month, new TreeMap<Integer, Map<Integer, Double>>());
+		Date currDate = fromDate;
+		System.out.println("::"+fromDate);
+		System.out.println("::"+toDate);
+		
+		while (currDate.before(toDate) || currDate.equals(toDate)) {
+			int currMonth = currDate.getMonth();
+			System.out.println(currMonth);
+			if (mnthDayMinuteWiseQtmMap.get(currMonth) == null)
+				mnthDayMinuteWiseQtmMap.put(currMonth, new TreeMap<Integer, Map<Integer, Double>>());
+			int currDay = currDate.getDay();
+			for (int i = currDay; i <= toDate.getDay(); i++) {
+				mnthDayMinuteWiseQtmMap.get(currMonth).put(i, new TreeMap<Integer, Double>());
+				Time currTime = fromPeriod;
+				while (currTime.before(toPeriod) || currTime.equals(toPeriod)) {
+					int minute = getNthMinuteByTime(currTime);
+					
+					mnthDayMinuteWiseQtmMap.get(currMonth).get(i).put(minute, qunatum);
+					currTime = addOneMinute(currTime);
+				}
+			}
+			currDate = DateUtils.addDays(currDate, 1);
+		}
+		System.out.println("::"+toDate);
+	}
+	
+	@SuppressWarnings("deprecation")
+	public Draft<ConcurrenceApplicationDTO> saveConcurrenceFormData(ConcurrenceApplicationDTO concurrenceApplicationDTO)
+			throws BusinessException {
+		concurrenceApplicationDTO.setDateOfApplication(new Date());
+		if (concurrenceApplicationDTO.getTransactionType().equalsIgnoreCase("Inter-State")) {
+			if (concurrenceApplicationDTO.getStoaType().equalsIgnoreCase("Advance")) {
+				List<RequestedPowerTransactionDTO> transactionDTOs = concurrenceApplicationDTO.getRequestedPowerTransactionDTOs();
+				for (RequestedPowerTransactionDTO requestedPowerTransactionDTO : transactionDTOs) {
+					Date fromDate = requestedPowerTransactionDTO.getFromDate();
+					Date toDate = requestedPowerTransactionDTO.getToDate();
+					Time fromPeroid = requestedPowerTransactionDTO.getFromPeriod();
+					Time toPeriod = requestedPowerTransactionDTO.getToPeriod();
+					
+					maxThreeMonthValidation(fromDate, toDate);
+					Double quantum = concurrenceApplicationDTO.getApplicantType().equals("Purchaser")
+							? requestedPowerTransactionDTO.getConsumerBusDrawlPoint()
+							: requestedPowerTransactionDTO.getGeneratorBusDeliveryPoint();
+					
+							requestPowerTransaction(fromDate, toDate, fromPeroid, toPeriod, quantum);
+					
+					if (fromDate.getMonth() != toDate.getMonth())
+						throw new BusinessException("Transaction can be done only within the month");
+				}
+			} 
+		} 
+		Draft<ConcurrenceApplicationDTO> concurrentDraft = new Draft<>();
+		concurrentDraft.setStatus(Status.PENDING);
+		concurrentDraft.setFunctionalityArea(FunctionalityArea.OA_NOC_APPLY);
+		concurrentDraft.setData(concurrenceApplicationDTO);
+		return concurrentDraftRepository.save(concurrentDraft);
+	}
+	
+	@SuppressWarnings("deprecation")
+	public Time addOneMinute(Time time) {
+		int min = time.getMinutes();
+		time.setMinutes(min + 1);
+		return time;
+	}
+	
+	@SuppressWarnings("deprecation")
+	private int getNthMinuteByTime(Time currTime) {
+		int hours = currTime.getHours();
+		int minutes = currTime.getMinutes();
+		int nthMinuteByTime = hours*60 + minutes;
+		
+		return nthMinuteByTime;
+	}
+
+
+}
+
+
